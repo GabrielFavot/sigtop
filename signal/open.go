@@ -34,6 +34,7 @@ type Context struct {
 	recipientsByConversationID map[string]*Recipient
 	recipientsByPhone          map[string]*Recipient
 	recipientsByACI            map[string]*Recipient
+	selfRecipient              *Recipient
 }
 
 func Open(betaApp bool, dir string, encKey *safestorage.RawEncryptionKey) (*Context, error) {

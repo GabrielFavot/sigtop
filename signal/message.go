@@ -136,26 +136,52 @@ const (
 )
 
 type messageJSON struct {
-	Attachments []attachmentJSON `json:"attachments"`
-	Mentions    []mentionJSON    `json:"bodyRanges"`
-	Reactions   []reactionJSON   `json:"reactions"`
-	Quote       *quoteJSON       `json:"quote"`
-	Edits       []editJSON       `json:"editHistory"`
+	Attachments   []attachmentJSON   `json:"attachments"`
+	Mentions      []mentionJSON      `json:"bodyRanges"`
+	Reactions     []reactionJSON     `json:"reactions"`
+	Quote         *quoteJSON         `json:"quote"`
+	Edits         []editJSON         `json:"editHistory"`
+	GroupV2Change *groupV2ChangeJSON `json:"groupV2Change"`
+}
+
+type groupV2ChangeJSON struct {
+	Details []groupV2ChangeDetailJSON `json:"details"`
+}
+
+type groupV2ChangeDetailJSON struct {
+	Type        string `json:"type"`
+	ACI         string `json:"aci"`
+	Inviter     string `json:"inviter"`
+	Count       int    `json:"count"`
+	NewTitle    string `json:"newTitle"`
+	Description string `json:"description"`
+	Removed     *bool  `json:"removed"`
 }
 
 type Message struct {
-	ID           string
-	Conversation *Recipient
-	Source       *Recipient
-	TimeSent     int64
-	TimeRecv     int64
-	Type         string
-	Body         MessageBody
-	JSON         string
-	Attachments  []Attachment
-	Reactions    []Reaction
-	Quote        *Quote
-	Edits        []Edit
+	ID            string
+	Conversation  *Recipient
+	Source        *Recipient
+	TimeSent      int64
+	TimeRecv      int64
+	Type          string
+	Body          MessageBody
+	JSON          string
+	Attachments   []Attachment
+	Reactions     []Reaction
+	Quote         *Quote
+	Edits         []Edit
+	GroupV2Change []GroupV2ChangeDetail
+}
+
+type GroupV2ChangeDetail struct {
+	Type        string
+	Who         *Recipient // The person affected (added, removed, etc.)
+	Inviter     *Recipient // For member-add-from-invite
+	Count       int        // For pending-add-many
+	NewTitle    string     // For title changes
+	Description string     // For description changes
+	Removed     *bool      // For avatar changes
 }
 
 type MessageBody struct {
@@ -407,7 +433,48 @@ func (c *Context) parseMessageJSON(msg *Message) (messageJSON, error) {
 	if err = c.parseEditJSON(msg, &jmsg); err != nil {
 		return jmsg, err
 	}
+	if err = c.parseGroupV2ChangeJSON(msg, &jmsg); err != nil {
+		return jmsg, err
+	}
 	return jmsg, nil
+}
+
+func (c *Context) parseGroupV2ChangeJSON(msg *Message, jmsg *messageJSON) error {
+	if jmsg.GroupV2Change == nil {
+		return nil
+	}
+
+	for _, detail := range jmsg.GroupV2Change.Details {
+		gd := GroupV2ChangeDetail{
+			Type:        detail.Type,
+			Count:       detail.Count,
+			NewTitle:    detail.NewTitle,
+			Description: detail.Description,
+			Removed:     detail.Removed,
+		}
+
+		// Resolve ACI to recipient name
+		if detail.ACI != "" {
+			rpt, err := c.recipientFromACI(detail.ACI)
+			if err != nil {
+				return err
+			}
+			gd.Who = rpt
+		}
+
+		// Resolve inviter ACI
+		if detail.Inviter != "" {
+			rpt, err := c.recipientFromACI(detail.Inviter)
+			if err != nil {
+				return err
+			}
+			gd.Inviter = rpt
+		}
+
+		msg.GroupV2Change = append(msg.GroupV2Change, gd)
+	}
+
+	return nil
 }
 
 func (m *Message) logError(err error, format string, a ...any) {

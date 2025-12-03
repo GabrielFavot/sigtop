@@ -316,3 +316,43 @@ func (r *Recipient) DetailedDisplayName() string {
 func (c *Context) ReadAvatar(avt *Avatar) ([]byte, error) {
 	return c.readAttachmentFile(&avt.attachmentFile)
 }
+
+// SelfRecipient returns the recipient for the current user (yourself)
+func (c *Context) SelfRecipient() (*Recipient, error) {
+	if c.selfRecipient != nil {
+		return c.selfRecipient, nil
+	}
+
+	// Get the user's ACI from the items table
+	stmt, _, err := c.db.Prepare("SELECT json FROM items WHERE id = 'uuid_id'")
+	if err != nil {
+		return nil, err
+	}
+
+	var aci string
+	if stmt.Step() {
+		var item struct {
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(stmt.ColumnText(0)), &item); err != nil {
+			stmt.Finalize()
+			return nil, fmt.Errorf("cannot parse uuid_id item: %w", err)
+		}
+		// The value is in format "uuid.deviceId", extract just the uuid
+		aci = strings.Split(item.Value, ".")[0]
+	}
+	stmt.Finalize()
+
+	if aci == "" {
+		return nil, nil
+	}
+
+	// Look up the recipient by ACI
+	rpt, err := c.recipientFromACI(aci)
+	if err != nil {
+		return nil, err
+	}
+
+	c.selfRecipient = rpt
+	return c.selfRecipient, nil
+}

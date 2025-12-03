@@ -194,7 +194,7 @@ func exportConversationMessages(ctx *signal.Context, d at.Dir, conv *signal.Conv
 
 	switch mode.format {
 	case formatJSON:
-		err = jsonWriteMessages(ew, msgs)
+		err = jsonWriteMessages(ctx, ew, msgs)
 	case formatText:
 		err = textWriteMessages(ew, msgs)
 	case formatTextShort:

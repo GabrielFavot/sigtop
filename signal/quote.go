@@ -48,6 +48,7 @@ type Quote struct {
 	TimeSent    int64
 	Body        MessageBody
 	Attachments []QuoteAttachment
+	QuotedQuote *Quote // The quote of the quoted message (if any)
 }
 
 type QuoteAttachment struct {
@@ -56,7 +57,17 @@ type QuoteAttachment struct {
 }
 
 func (c *Context) parseQuoteJSON(jqte *quoteJSON) (*Quote, error) {
+	return c.parseQuoteJSONWithDepth(jqte, 0)
+}
+
+func (c *Context) parseQuoteJSONWithDepth(jqte *quoteJSON, depth int) (*Quote, error) {
 	if jqte == nil {
+		return nil, nil
+	}
+
+	// Limit recursion depth to avoid infinite loops
+	const maxDepth = 10
+	if depth >= maxDepth {
 		return nil, nil
 	}
 
@@ -104,5 +115,51 @@ func (c *Context) parseQuoteJSON(jqte *quoteJSON) (*Quote, error) {
 		qte.Attachments = append(qte.Attachments, att)
 	}
 
+	// Try to find the quoted message's own quote (quote chain)
+	if qte.TimeSent > 0 {
+		quotedQuote, err := c.findQuoteOfMessage(qte.TimeSent, depth+1)
+		if err != nil {
+			// Non-fatal error, just skip
+			quotedQuote = nil
+		}
+		qte.QuotedQuote = quotedQuote
+	}
+
 	return &qte, nil
+}
+
+// findQuoteOfMessage finds the quote of the message with the given timestamp
+func (c *Context) findQuoteOfMessage(sentAt int64, depth int) (*Quote, error) {
+	query := "SELECT json FROM messages WHERE sent_at = ? LIMIT 1"
+	stmt, _, err := c.db.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Finalize()
+
+	if err := stmt.BindInt64(1, sentAt); err != nil {
+		return nil, err
+	}
+
+	if !stmt.Step() {
+		return nil, nil // Message not found
+	}
+
+	jsonStr := stmt.ColumnText(0)
+	if jsonStr == "" {
+		return nil, nil
+	}
+
+	var msgJSON struct {
+		Quote *quoteJSON `json:"quote"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &msgJSON); err != nil {
+		return nil, nil // Ignore parse errors
+	}
+
+	if msgJSON.Quote == nil {
+		return nil, nil
+	}
+
+	return c.parseQuoteJSONWithDepth(msgJSON.Quote, depth)
 }
